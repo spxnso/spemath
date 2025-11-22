@@ -1,30 +1,30 @@
 use crate::lexer::token::Token;
 use core::panic;
 
-pub struct Lexer {
-    chars: Vec<char>,
+pub struct Lexer<'a> {
+    input: &'a str,
     pos: usize,
     current_char: Option<char>,
 }
 
-impl Lexer {
-    pub fn new(input: &str) -> Self {
-        let chars: Vec<char> = input.chars().collect();
-        let current_char = chars.get(0).copied();
-        Self {
-            chars,
+impl<'a> Lexer<'a> {
+    pub fn new(input: &'a str) -> Self {
+        let mut lexer = Self {
+            input,
             pos: 0,
-            current_char,
-        }
+            current_char: None,
+        };
+        lexer.current_char = lexer.input.chars().nth(0);
+        lexer
     }
 
     fn advance(&mut self) {
         self.pos += 1;
-        self.current_char = self.chars.get(self.pos).copied();
+        self.current_char = self.input.chars().nth(self.pos)
     }
 
     fn peek(&self) -> Option<char> {
-        self.chars.get(self.pos + 1).copied()
+        self.input.chars().nth(self.pos + 1)
     }
 
     fn skip_whitespace(&mut self) {
@@ -53,7 +53,6 @@ impl Lexer {
 
     fn number(&mut self) -> Token {
         let mut num_str = String::new();
-
         while let Some(c) = self.current_char {
             if c.is_digit(10) || c == '.' {
                 num_str.push(c);
@@ -63,46 +62,10 @@ impl Lexer {
             }
         }
 
-        if let Some('e') | Some('E') = self.current_char {
-            num_str.push(self.current_char.unwrap());
-            self.advance();
-
-            if let Some('+') | Some('-') = self.current_char {
-                num_str.push(self.current_char.unwrap());
-                self.advance();
-            }
-
-            let mut exponent_digits = 0;
-            while let Some(c) = self.current_char {
-                if c.is_digit(10) {
-                    num_str.push(c);
-                    self.advance();
-                    exponent_digits += 1;
-                } else {
-                    break;
-                }
-            }
-
-            if exponent_digits == 0 {
-                panic!("Invalid scientific notation: missing digits in exponent");
-            }
-        }
-
         Token::Number(num_str.parse::<f64>().unwrap())
     }
 
-    fn match_double(&mut self, single: Token, double: Token, char: char) -> Token {
-        if self.peek() == Some(char) {
-            self.advance();
-            self.advance();
-            double
-        } else {
-            self.advance();
-            single
-        }
-    }
-
-    fn push_single(&mut self, tokens: &mut Vec<Token>, token: Token) {
+    fn push_token(&mut self, tokens: &mut Vec<Token>, token: Token) {
         tokens.push(token);
         self.advance();
     }
@@ -112,14 +75,11 @@ impl Lexer {
 
         while let Some(c) = self.current_char {
             match c {
-                c if c.is_whitespace() => self.skip_whitespace(),
-                // Literals
-                '0'..='9' | '.' => tokens.push(self.number()),
+                '0'..'9' | '.' => tokens.push(self.number()),
                 'a'..='z' | 'A'..='Z' | '_' => tokens.push(self.identifier()),
-                // Binary operators
-                '+' => self.push_single(&mut tokens, Token::Plus),
-                '-' => self.push_single(&mut tokens, Token::Minus),
-                '*' => self.push_single(&mut tokens, Token::Star),
+                '+' => self.push_token(&mut tokens, Token::Plus),
+                '-' => self.push_token(&mut tokens, Token::Minus),
+                '*' => self.push_token(&mut tokens, Token::Star),
                 '/' => match self.peek() {
                     Some('/') => {
                         while let Some(ch) = self.current_char {
@@ -141,23 +101,60 @@ impl Lexer {
                             self.advance();
                         }
                     }
-                    _ => self.push_single(&mut tokens, Token::Slash),
+                    _ => self.push_token(&mut tokens, Token::Slash),
                 },
-                '%' => self.push_single(&mut tokens, Token::Percent),
-                '^' => self.push_single(&mut tokens, Token::Caret),
-                '!' => tokens.push(self.match_double(Token::Exclamation, Token::ExclamationEqual, '=')),
-                '=' => tokens.push(self.match_double(Token::Equal, Token::EqualEqual, '=')),
-                '<' => tokens.push(self.match_double(Token::Less, Token::LessEqual, '=')),
-                '>' => tokens.push(self.match_double(Token::Greater, Token::GreaterEqual, '=')),
-                // Punctuation
-                '(' => self.push_single(&mut tokens, Token::LParen),
-                ')' => self.push_single(&mut tokens, Token::RParen),
-                '[' => self.push_single(&mut tokens, Token::LBracket),
-                ']' => self.push_single(&mut tokens, Token::RBracket),
-                '{' => self.push_single(&mut tokens, Token::LBrace),
-                '}' => self.push_single(&mut tokens, Token::RBrace),
-                ',' => self.push_single(&mut tokens, Token::Comma),
-                ';' => self.push_single(&mut tokens, Token::Semicolon),
+                '%' => self.push_token(&mut tokens, Token::Percent),
+                '^' => self.push_token(&mut tokens, Token::Caret),
+                '(' => self.push_token(&mut tokens, Token::LParen),
+                ')' => self.push_token(&mut tokens, Token::RParen),
+                '[' => self.push_token(&mut tokens, Token::LBracket),
+                ']' => self.push_token(&mut tokens, Token::RBracket),
+                '{' => self.push_token(&mut tokens, Token::LBrace),
+                '}' => self.push_token(&mut tokens, Token::RBrace),
+                ',' => self.push_token(&mut tokens, Token::Comma),
+                '!' => {
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::ExclamationEqual);
+                    } else {
+                        self.advance();
+                        tokens.push(Token::Exclamation);
+                    }
+                }
+                '=' => {
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::EqualEqual);
+                    } else {
+                        self.advance();
+                        tokens.push(Token::Equal);
+                    }
+                }
+                '<' => {
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::LessEqual);
+                    } else {
+                        self.advance();
+                        tokens.push(Token::Less);
+                    }
+                }
+
+                '>' => {
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::GreaterEqual);
+                    } else {
+                        self.advance();
+                        tokens.push(Token::Greater);
+                    }
+                }
+                ';' => self.push_token(&mut tokens, Token::Semicolon),
+                c if c.is_whitespace() => self.skip_whitespace(),
                 _ => panic!("Unknown character: {:?}", c),
             }
         }
