@@ -1,30 +1,32 @@
+// TODO: Refactor double operator
+
 use crate::lexer::token::Token;
 use core::panic;
 
-pub struct Lexer<'a> {
-    input: &'a str,
+pub struct Lexer {
+    chars: Vec<char>,
     pos: usize,
     current_char: Option<char>,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str) -> Self {
-        let mut lexer = Self {
-            input,
+impl Lexer {
+    pub fn new(input: &str) -> Self {
+        let chars: Vec<char> = input.chars().collect();
+        let current_char = chars.get(0).copied();
+        Self {
+            chars,
             pos: 0,
-            current_char: None,
-        };
-        lexer.current_char = lexer.input.chars().nth(0);
-        lexer
+            current_char,
+        }
     }
 
     fn advance(&mut self) {
         self.pos += 1;
-        self.current_char = self.input.chars().nth(self.pos)
+        self.current_char = self.chars.get(self.pos).copied();
     }
 
     fn peek(&self) -> Option<char> {
-        self.input.chars().nth(self.pos + 1)
+        self.chars.get(self.pos + 1).copied()
     }
 
     fn skip_whitespace(&mut self) {
@@ -53,12 +55,38 @@ impl<'a> Lexer<'a> {
 
     fn number(&mut self) -> Token {
         let mut num_str = String::new();
+
         while let Some(c) = self.current_char {
             if c.is_digit(10) || c == '.' {
                 num_str.push(c);
                 self.advance();
             } else {
                 break;
+            }
+        }
+
+        if let Some('e') | Some('E') = self.current_char {
+            num_str.push(self.current_char.unwrap());
+            self.advance();
+
+            if let Some('+') | Some('-') = self.current_char {
+                num_str.push(self.current_char.unwrap());
+                self.advance();
+            }
+
+            let mut exponent_digits = 0;
+            while let Some(c) = self.current_char {
+                if c.is_digit(10) {
+                    num_str.push(c);
+                    self.advance();
+                    exponent_digits += 1;
+                } else {
+                    break;
+                }
+            }
+
+            if exponent_digits == 0 {
+                panic!("Invalid scientific notation: missing digits in exponent");
             }
         }
 
@@ -75,36 +103,33 @@ impl<'a> Lexer<'a> {
 
         while let Some(c) = self.current_char {
             match c {
-                '0'..'9' | '.' => tokens.push(self.number()),
+                '0'..='9' | '.' => tokens.push(self.number()),
                 'a'..='z' | 'A'..='Z' | '_' => tokens.push(self.identifier()),
                 '+' => self.push_token(&mut tokens, Token::Plus),
                 '-' => self.push_token(&mut tokens, Token::Minus),
                 '*' => self.push_token(&mut tokens, Token::Star),
-                '/' => {
-                    match self.peek() {
-                        Some('/') => {
-                            while let Some(ch) = self.current_char {
-                                if ch == '\n' {
-                                    break;
-                                }
-                                self.advance();
+                '/' => match self.peek() {
+                    Some('/') => {
+                        while let Some(ch) = self.current_char {
+                            if ch == '\n' {
+                                break;
                             }
-                        }
-                        Some('*') => {
                             self.advance();
-                            self.advance();
-                            while let Some(ch) = self.current_char {
-                                if ch == '*' && self.peek() == Some('/') {
-                                    self.advance();
-                                    self.advance();
-                                    break;
-                                }
-                                self.advance();
-                            }
-
                         }
-                        _ => self.push_token(&mut tokens, Token::Slash),
                     }
+                    Some('*') => {
+                        self.advance();
+                        self.advance();
+                        while let Some(ch) = self.current_char {
+                            if ch == '*' && self.peek() == Some('/') {
+                                self.advance();
+                                self.advance();
+                                break;
+                            }
+                            self.advance();
+                        }
+                    }
+                    _ => self.push_token(&mut tokens, Token::Slash),
                 },
                 '%' => self.push_token(&mut tokens, Token::Percent),
                 '^' => self.push_token(&mut tokens, Token::Caret),
