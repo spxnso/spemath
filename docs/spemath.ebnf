@@ -1,0 +1,32 @@
+# TODO: Blabla
+## EBNF Grammar
+
+program     = { expression ";" } ;
+
+expression  = assignment
+            | sum ;
+
+### Assignments
+assignment  = identifier "=" expression
+            | identifier "(" identifier { "," identifier } ")" "=" expression ;
+            # TODO: Suites
+
+### Arithmetic Expressions
+sum         = product { ("+" | "-") product } ;
+product     = power { ("*" | "/" | "%") power } ;
+power       = unary { "^" unary } ;
+unary       = ["+" | "-"] primary ;
+
+### Primary Expressions
+primary     = number
+            | identifier
+            | function_call
+            | "(" expression ")" ;
+
+function_call = identifier "(" [ expression { "," expression } ] ")" ;
+
+### Literals and identifiers
+number      = digit { digit } [ "." digit { digit } ] ;
+identifier  = letter { letter | digit | "_" } ;
+letter      = "A"..."Z" | "a"..."z" ;
+digit       = "0"..."9" ;
