@@ -1,5 +1,4 @@
 use crate::lexer::token::Token;
-use core::panic;
 
 pub struct Lexer<'a> {
     input: &'a str,
@@ -27,10 +26,14 @@ impl<'a> Lexer<'a> {
         self.input.chars().nth(self.pos + 1)
     }
 
-    fn skip_whitespace(&mut self) {
+    fn whitespace(&mut self, tokens: &mut Vec<Token>) {
         while let Some(c) = self.current_char {
             if c.is_whitespace() {
-                self.advance();
+                if c == '\n' {
+                    self.push_token(tokens, Token::Newline);
+                } else {
+                    self.advance();
+                }
             } else {
                 break;
             }
@@ -54,7 +57,7 @@ impl<'a> Lexer<'a> {
     fn number(&mut self) -> Token {
         let mut num_str = String::new();
         while let Some(c) = self.current_char {
-            if c.is_digit(10) || c == '.' {
+            if c.is_ascii_digit() || c == '.' {
                 num_str.push(c);
                 self.advance();
             } else {
@@ -75,7 +78,7 @@ impl<'a> Lexer<'a> {
 
         while let Some(c) = self.current_char {
             match c {
-                '0'..'9' | '.' => tokens.push(self.number()),
+                '0'..='9' | '.' => tokens.push(self.number()),
                 'a'..='z' | 'A'..='Z' | '_' => tokens.push(self.identifier()),
                 '+' => self.push_token(&mut tokens, Token::Plus),
                 '-' => self.push_token(&mut tokens, Token::Minus),
@@ -154,12 +157,12 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 ';' => self.push_token(&mut tokens, Token::Semicolon),
-                c if c.is_whitespace() => self.skip_whitespace(),
+                c if c.is_whitespace() => self.whitespace(&mut tokens),
                 _ => panic!("Unknown character: {:?}", c),
             }
         }
 
-        tokens.push(Token::EOF);
+        tokens.push(Token::Eof);
         tokens
     }
 }

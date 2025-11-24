@@ -1,4 +1,4 @@
-# TODO: Blabla
+# TODO
 ## EBNF Grammar
 
 program     = { expression ";" } ;
