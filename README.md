@@ -8,3 +8,5 @@ Il est conçu pour être fidèle aux conventions mathématiques enseignées en p
 ## Syntaxe de base
 
 Voir la [documentation](docs/syntax.md)
+
+TODO: Flags

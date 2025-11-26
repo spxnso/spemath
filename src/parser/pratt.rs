@@ -1,31 +1,19 @@
+use crate::parser::error::ParserError;
 use crate::{lexer::token::Token, parser::ast::Expr};
 
 #[derive(PartialOrd, Ord, PartialEq, Eq, Debug, Clone, Copy)]
 enum Precedence {
     Lowest = 0,
-    Assignment = 1, // =
-    Comparison = 2, // == != < > <= >=
-    Sum = 3,        // + -
-    Product = 4,    // * / %
-    Power = 5,      // ^
-    Prefix = 6,     // -x
-    Call = 7,       // f(x)
+    Assignment = 1,
+    Comparison = 2,
+    Sum = 3,
+    Product = 4,
+    Power = 5,
+    Prefix = 6,
+    Call = 7,
 }
 
 impl Precedence {
-    fn from_u8(value: u8) -> Precedence {
-        match value {
-            1 => Precedence::Assignment,
-            2 => Precedence::Comparison,
-            3 => Precedence::Sum,
-            4 => Precedence::Product,
-            5 => Precedence::Power,
-            6 => Precedence::Prefix,
-            7 => Precedence::Call,
-            _ => Precedence::Lowest,
-        }
-    }
-
     fn from_token(token: &Token) -> Precedence {
         match token {
             Token::Equal => Precedence::Assignment,
@@ -55,105 +43,180 @@ impl Parser {
     }
 
     fn previous(&self) -> Option<&Token> {
-        if self.pos == 0 {
-            None
-        } else {
-            self.tokens.get(self.pos - 1)
+        let mut i = self.pos;
+        while i > 0 {
+            i -= 1;
+            if let Some(token) = self.tokens.get(i) {
+                if !matches!(token, Token::Whitespace) {
+                    return Some(token);
+                }
+            }
         }
+        None
     }
 
     fn current(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
     }
 
-    // fn peek(&self) -> Option<&Token> {
-    //     self.tokens.get(self.pos + 1)
-    // }
-
     fn advance(&mut self) {
         self.pos += 1;
     }
 
-    fn expect(&mut self, expected: &Token) {
-        if self.current() == Some(expected) {
+    fn skip_whitespace(&mut self) {
+        while let Some(Token::Whitespace) = self.current() {
             self.advance();
-        } else {
-            panic!("Expected {:?}, found {:?}", expected, self.current());
         }
     }
 
-    pub fn parse(&mut self) -> Vec<Expr> {
+    fn has_whitespace_before(&self) -> bool {
+        if self.pos > 0 {
+            matches!(self.tokens.get(self.pos - 1), Some(Token::Whitespace))
+        } else {
+            false
+        }
+    }
+
+    fn expect(&mut self, expected: &Token) -> Result<(), ParserError> {
+        self.skip_whitespace();
+        if self.current() == Some(expected) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(ParserError::UnexpectedToken(
+                self.current().cloned().unwrap_or(Token::Eof),
+                self.pos,
+            ))
+        }
+    }
+
+    pub fn parse(&mut self) -> Result<Vec<Expr>, ParserError> {
         self.program()
     }
 
-    fn program(&mut self) -> Vec<Expr> {
+    fn program(&mut self) -> Result<Vec<Expr>, ParserError> {
         let mut nodes = Vec::new();
 
         while let Some(tok) = self.current().cloned() {
             match tok {
                 Token::Eof => break,
-                Token::Newline | Token::Semicolon => {
+                Token::Newline | Token::Semicolon | Token::Whitespace => {
                     self.advance();
                 }
                 _ => {
-                    if let Some(expr) = self.expression(Precedence::Lowest) {
-                        nodes.push(expr);
-                    } else {
-                        panic!("Unexpected token: {:?}", tok);
-                    }
+                    let expr = self.expression(Precedence::Lowest)?;
+                    nodes.push(expr);
                 }
             }
         }
 
-        nodes
+        Ok(nodes)
     }
 
-    fn expression(&mut self, precedence: Precedence) -> Option<Expr> {
+    fn expression(&mut self, precedence: Precedence) -> Result<Expr, ParserError> {
         let mut left = self.prefix()?;
 
-        while let Some(token) = self.current().cloned() {
+        loop {
+            self.skip_whitespace();
+
+            let Some(token) = self.current().cloned() else {
+                break;
+            };
+
             match token {
-                Token::Eof | Token::Newline => break,
+                Token::Eof | Token::Newline | Token::Semicolon => break,
 
                 Token::Equal => {
-                    if let Expr::Identifier(name) = left {
-                        self.advance();
-                        let right = self.expression(Precedence::Assignment)?;
-                        left = Expr::Assignment {
-                            target: name,
-                            value: Box::new(right),
+                    let token_prec = Precedence::Assignment;
+                    if token_prec <= precedence {
+                        break;
+                    }
+
+                    match left {
+                        Expr::Call { function, args } => {
+                            if let Expr::Identifier(name) = *function {
+                                let mut params = Vec::new();
+
+                                for arg in args {
+                                    if let Expr::Identifier(param_name) = arg {
+                                        params.push(param_name);
+                                    } else {
+                                        return Err(ParserError::InvalidFunctionParameter(
+                                            self.pos, arg,
+                                        ));
+                                    }
+                                }
+
+                                self.advance();
+                                let body = self.expression(Precedence::Assignment)?;
+                                left = Expr::Function {
+                                    name,
+                                    args: params,
+                                    body: Box::new(body),
+                                };
+                            } else {
+                                return Err(ParserError::InvalidFunctionDefinition(
+                                    self.pos, token,
+                                ));
+                            }
+                        }
+                        Expr::Identifier(name) => {
+                            self.advance();
+                            let value = self.expression(Precedence::Assignment)?;
+                            left = Expr::Assignment {
+                                target: name,
+                                value: Box::new(value),
+                            };
+                        }
+                        _ => {
+                            return Err(ParserError::InvalidAssignment(self.pos, left, token));
+                        }
+                    }
+                }
+
+                Token::LParen => {
+                    if matches!(left, Expr::Identifier(_)) 
+                        && !self.has_whitespace_before()
+                        && precedence < Precedence::Product
+                    {
+                        left = self.call(left)?;
+                    } else if !self.has_whitespace_before() {
+                        let token_prec = Precedence::Product;
+                        if token_prec <= precedence {
+                            break;
+                        }
+
+                        let right = self.expression(token_prec)?;
+                        left = Expr::Binary {
+                            left: Box::new(left),
+                            op: Token::Star,
+                            right: Box::new(right),
                         };
-                        continue;
                     } else {
-                        panic!("Left side of assignment must be an identifier");
+                        break;
                     }
                 }
 
                 t if self.is_implicit_multiplication(&t) => {
-                    let token_prec = Precedence::from_token(&Token::Star);
-                    if (token_prec as u8) <= (precedence as u8) {
+                    let token_prec = Precedence::Product;
+                    if token_prec < precedence {
                         break;
                     }
+
                     let right = self.expression(token_prec)?;
                     left = Expr::Binary {
                         left: Box::new(left),
                         op: Token::Star,
                         right: Box::new(right),
                     };
-                    continue;
-                }
-
-                Token::LParen => {
-                    left = self.call(left)?;
-                    continue;
                 }
 
                 _ => {
                     let token_prec = Precedence::from_token(&token);
 
                     let should_break = match token {
-                        Token::Caret => (token_prec as u8) < (precedence as u8),
-                        _ => (token_prec as u8) <= (precedence as u8),
+                        Token::Caret => token_prec < precedence,
+                        _ => token_prec <= precedence,
                     };
 
                     if should_break {
@@ -162,12 +225,7 @@ impl Parser {
 
                     self.advance();
 
-                    let next_prec = match token {
-                        Token::Caret => token_prec,
-                        _ => Precedence::from_u8((token_prec as u8) + 1),
-                    };
-
-                    let right = self.expression(next_prec)?;
+                    let right = self.expression(token_prec)?;
                     left = Expr::Binary {
                         left: Box::new(left),
                         op: token,
@@ -177,108 +235,65 @@ impl Parser {
             }
         }
 
-        Some(left)
+        Ok(left)
     }
 
-    fn prefix(&mut self) -> Option<Expr> {
-        match self.current().cloned()? {
-            Token::Number(n) => {
+    fn prefix(&mut self) -> Result<Expr, ParserError> {
+        self.skip_whitespace();
+
+        match self.current().cloned() {
+            Some(Token::Number(n)) => {
                 self.advance();
-                Some(Expr::Number(n))
+                Ok(Expr::Number(n))
             }
 
-            Token::Identifier(name) => {
+            Some(Token::Identifier(name)) => {
                 self.advance();
-
-                if self.current() == Some(&Token::LParen) {
-                    let params = self.params();
-
-                    if self.current() == Some(&Token::Equal) {
-                        self.advance();
-                        let body = self.expression(Precedence::Lowest)?;
-                        return Some(Expr::FunctionDef {
-                            name,
-                            args: params,
-                            body: Box::new(body),
-                        });
-                    }
-
-                    let args = params.into_iter().map(Expr::Identifier).collect();
-
-                    return Some(Expr::Call {
-                        function: Box::new(Expr::Identifier(name)),
-                        args,
-                    });
-                }
-
-                Some(Expr::Identifier(name))
+                Ok(Expr::Identifier(name))
             }
 
-            Token::Minus | Token::Plus => {
+            Some(Token::Minus) | Some(Token::Plus) => {
                 let op = self.current().cloned().unwrap();
                 self.advance();
-                Some(Expr::Unary {
+                let expr = self.expression(Precedence::Prefix)?;
+                Ok(Expr::Unary {
                     op,
-                    expr: Box::new(self.expression(Precedence::Prefix)?),
+                    expr: Box::new(expr),
                 })
             }
 
-            Token::LParen => {
+            Some(Token::LParen) => {
                 self.advance();
                 let expr = self.expression(Precedence::Lowest)?;
-                self.expect(&Token::RParen);
-                Some(expr)
+                self.expect(&Token::RParen)?;
+                Ok(expr)
             }
 
-            _ => None,
+            _ => Err(ParserError::UnexpectedToken(
+                self.current().cloned().unwrap_or(Token::Eof),
+                self.pos,
+            )),
         }
     }
 
-    fn call(&mut self, function: Expr) -> Option<Expr> {
-        self.expect(&Token::LParen);
-
-        let mut args = Vec::new();
-
-        if self.current() != Some(&Token::RParen) {
-            loop {
-                let arg = self.expression(Precedence::Lowest)?;
-                args.push(arg);
-
-                if self.current() == Some(&Token::Comma) {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-        }
-
-        self.expect(&Token::RParen);
-
-        Some(Expr::Call {
+    fn call(&mut self, function: Expr) -> Result<Expr, ParserError> {
+        let args = self.arguments()?;
+        Ok(Expr::Call {
             function: Box::new(function),
             args,
         })
     }
 
-    fn params(&mut self) -> Vec<String> {
-        let mut params = Vec::new();
+    fn arguments(&mut self) -> Result<Vec<Expr>, ParserError> {
+        self.expect(&Token::LParen)?;
+        let mut args = Vec::new();
 
-        self.expect(&Token::LParen);
-
+        self.skip_whitespace();
         if self.current() != Some(&Token::RParen) {
             loop {
-                match self.current().cloned() {
-                    Some(Token::Identifier(p)) => {
-                        params.push(p);
-                        self.advance();
-                    }
-                    Some(Token::Number(n)) => {
-                        params.push(n.to_string());
-                        self.advance();
-                    }
-                    _ => panic!("Expected parameter name"),
-                }
+                args.push(self.expression(Precedence::Lowest)?);
 
+                self.skip_whitespace();
                 if self.current() == Some(&Token::Comma) {
                     self.advance();
                 } else {
@@ -287,22 +302,30 @@ impl Parser {
             }
         }
 
-        self.expect(&Token::RParen);
-        params
+        self.expect(&Token::RParen)?;
+        Ok(args)
     }
 
     fn is_implicit_multiplication(&self, token: &Token) -> bool {
         use Token::*;
 
+        if self.has_whitespace_before() {
+            return false;
+        }
+
         match token {
-            Identifier(_) | LParen => {
+            LParen => {
                 matches!(
                     self.previous(),
                     Some(Number(_)) | Some(Identifier(_)) | Some(RParen)
                 )
             }
-            Number(_) => matches!(self.previous(), Some(RParen)),
 
+            Identifier(_) => {
+                matches!(self.previous(), Some(Number(_)) | Some(RParen))
+            }
+
+            Number(_) => matches!(self.previous(), Some(RParen) | Some(Identifier(_))),
             _ => false,
         }
     }

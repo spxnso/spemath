@@ -1,7 +1,7 @@
 use crate::lexer::token::Token;
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(f64),
     Identifier(String),
@@ -22,7 +22,7 @@ pub enum Expr {
         function: Box<Expr>,
         args: Vec<Expr>
     },
-    FunctionDef {
+    Function {
         name: String,
         args: Vec<String>,
         body: Box<Expr>,

@@ -25,5 +25,6 @@ pub enum Token {
     ExclamationEqual,
     Semicolon,
     Newline,
+    Whitespace,
     Eof,
 }

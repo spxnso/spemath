@@ -36,6 +36,7 @@ jobs:
 
       - name: Lint code
         run: cargo clippy --all-targets --all-features
+      
       - name: Build project
         run: cargo build --verbose
 
