@@ -1,57 +1,50 @@
 use std::fs;
 
+mod interpreter;
+mod lexer;
+mod parser;
+
+
 use crate::interpreter::eval::Evaluator;
 use crate::interpreter::value::Value;
 use crate::lexer::tokenizer::Lexer;
 use crate::parser::pratt::Parser;
 
-mod interpreter;
-mod lexer;
-mod parser;
 
 fn main() {
     env_logger::init();
-    let source = fs::read_to_string("input.spemath").expect("Could not read input.spemath");
 
-    log::info!("Starting lexer...");
+    let source = fs::read_to_string("input.spemath")
+        .expect("Could not read input.spemath");
+
     let mut lexer = Lexer::new(&source);
     let tokens = match lexer.tokenize() {
-        Ok(tokens) => {
-            log::info!("Lexer produced {} token(s)", tokens.len());
-            tokens
-        }
+        Ok(tokens) => tokens,
         Err(errors) => {
-            log::info!("Lexer encountered {} error(s)", errors.len());
             for err in errors {
-                log::error!("{:?}", err);
+                eprintln!("{:?}", err);
             }
             return;
         }
     };
 
-    log::debug!("Tokens: {:#?}", tokens);
-
-    log::info!("Starting parser...");
     let mut parser = Parser::new(tokens);
-    match parser.parse() {
-        Ok(exprs) => {
-            log::info!("Parser produced {} expression(s)", exprs.len());
-            log::debug!("AST: {:#?}", exprs);
-
-            let mut evaluator = Evaluator::new();
-
-            for expr in exprs {
-                match evaluator.eval(&expr) {
-                    Ok(Value::Unit) => {},
-                    Ok(value) => println!("{:?}", value),
-                    Err(err) => log::error!("Evaluation error: {}", err),
-                }
-            }
-        }
+    let exprs = match parser.parse() {
+        Ok(e) => e,
         Err(errors) => {
-            for error in errors {
-                log::error!("Error: {}", error);
+            for err in errors {
+                eprintln!("Error: {}", err);
             }
+            return;
+        }
+    };
+
+    let mut evaluator = Evaluator::new();
+    for expr in exprs {
+        match evaluator.eval(&expr) {
+            Ok(Value::Unit) => {}
+            Ok(value) => println!("{:?}", value),
+            Err(err) => eprintln!("Evaluation error: {}", err),
         }
     }
 }
