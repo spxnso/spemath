@@ -1,10 +1,14 @@
 use std::fs;
 
+use crate::interpreter::eval::Evaluator;
+use crate::interpreter::value::Value;
 use crate::lexer::tokenizer::Lexer;
 use crate::parser::pratt::Parser;
 
+mod interpreter;
 mod lexer;
 mod parser;
+
 fn main() {
     env_logger::init();
     let source = fs::read_to_string("input.spemath").expect("Could not read input.spemath");
@@ -31,8 +35,18 @@ fn main() {
     let mut parser = Parser::new(tokens);
     match parser.parse() {
         Ok(exprs) => {
-           log::info!("Parser produced {} expression(s)", exprs.len());
-           log::debug!("AST: {:#?}", exprs);
+            log::info!("Parser produced {} expression(s)", exprs.len());
+            log::debug!("AST: {:#?}", exprs);
+
+            let mut evaluator = Evaluator::new();
+
+            for expr in exprs {
+                match evaluator.eval(&expr) {
+                    Ok(Value::Unit) => {},
+                    Ok(value) => println!("{:?}", value),
+                    Err(err) => log::error!("Evaluation error: {}", err),
+                }
+            }
         }
         Err(errors) => {
             for error in errors {
@@ -40,5 +54,4 @@ fn main() {
             }
         }
     }
-
 }
