@@ -8,8 +8,11 @@ mod parser_tests {
         let mut lexer = Lexer::new(input);
         let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
-        let mut exprs = parser.parse()?;
-        Ok(exprs.remove(0))
+
+        match parser.parse() {
+            Ok(mut exprs) => Ok(exprs.remove(0)),
+            Err(mut errs) => Err(errs.remove(0)),
+        }
     }
 
     #[test]
@@ -194,8 +197,9 @@ mod parser_tests {
     #[test]
     fn test_invalid_assignment_target() {
         let err = parse("5 = x").unwrap_err();
+        println!("{:?} siigma", err);
         match err {
-            ParserError::InvalidAssignment(_, _, _) => {}
+            ParserError::InvalidAssignment { .. } => {}
             _ => panic!("Expected InvalidAssignment"),
         }
     }
@@ -217,7 +221,10 @@ mod parser_tests {
     fn test_unexpected_token_error() {
         let err = parse(")").unwrap_err();
         match err {
-            ParserError::UnexpectedToken(Token::RParen, _) => {}
+            ParserError::UnexpectedToken {
+                found: Token::RParen,
+                ..
+            } => {}
             _ => panic!("Expected UnexpectedToken"),
         }
     }
@@ -226,8 +233,10 @@ mod parser_tests {
     fn test_missing_parenthesis() {
         let err = parse("(1 + 2").unwrap_err();
         match err {
-            ParserError::UnexpectedToken(Token::Eof, _) => {}
-            _ => panic!("Expected UnexpectedToken for missing ')'"),
+            ParserError::UnexpectedEof { expected, .. } => {
+                assert_eq!(expected, Token::RParen.description());
+            }
+            _ => panic!("Expected UnexpectedEof with expected ')'"),
         }
     }
 }

@@ -27,9 +27,18 @@ fn main() {
 
     log::debug!("Tokens: {:#?}", tokens);
 
+    log::info!("Starting parser...");
     let mut parser = Parser::new(tokens);
+    match parser.parse() {
+        Ok(exprs) => {
+           log::info!("Parser produced {} expression(s)", exprs.len());
+           log::debug!("AST: {:#?}", exprs);
+        }
+        Err(errors) => {
+            for error in errors {
+                log::error!("Error: {}", error);
+            }
+        }
+    }
 
-    let ast = parser.parse();
-
-    println!("{:#?}", ast);
 }

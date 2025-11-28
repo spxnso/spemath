@@ -2,25 +2,51 @@ use thiserror::Error;
 
 use crate::{lexer::token::Token, parser::ast::Expr};
 
-#[allow(dead_code)]
-#[derive(Debug, Error)]
+#[derive(Error, Debug, Clone)]
 pub enum ParserError {
+    #[error("line {line}, col {col}: Unexpected token '{}'", found.description())]
+    UnexpectedToken {
+        found: Token,
+        line: usize,
+        col: usize,
+        pos: usize,
+    },
 
-    #[error("Unexpected token {0:?} at position {1}")]
-    UnexpectedToken(Token, usize),
+    #[error("line {line}, col {col}: Expected {}, found {}", expected.description(), found.description())]
+    ExpectedToken {
+        expected: Token,
+        found: Token,
+        line: usize,
+        col: usize,
+        pos: usize,
+    },
 
-    #[error("Expected token {0:?} but found {1:?} at position {2}")]
-    ExpectedToken(Token, Token, usize),
+    #[error("line {line}, col {col}: Unexpected end of input, expected '{expected}'")]
+    UnexpectedEof {
+        expected: String,
+        line: usize,
+        col: usize,
+        pos: usize,
+    },
 
-    #[error("Invalid assignment, left-hand side must be a variable at position {0}")]
-    InvalidAssignment(usize, Expr, Token),
+    #[error(
+        "line {line}, col {col}: Cannot assign to '{target:?}', left-hand side must be a variable"
+    )]
+    InvalidAssignment {
+        target: Expr,
+        line: usize,
+        col: usize,
+        pos: usize,
+    },
 
-    #[error("Invalid function parameters at position {0}")]
-    InvalidFunctionParameter(usize, Expr),
+    #[error("line {line}, col {col}: Function parameter must be an identifier, found '{param:?}'")]
+    InvalidFunctionParameter {
+        param: Expr,
+        line: usize,
+        col: usize,
+        pos: usize,
+    },
 
-    #[error("Invalid function definition at position {0}")]
-    InvalidFunctionDefinition(usize, Token),
-
-    #[error("Unexpected end of input at position {0}")]
-    UnexpectedEOF(usize, Token),
+    #[error("line {line}, col {col}: Invalid function definition syntax")]
+    InvalidFunctionDefinition { line: usize, col: usize, pos: usize },
 }

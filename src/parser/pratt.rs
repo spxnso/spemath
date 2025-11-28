@@ -1,3 +1,4 @@
+use crate::lexer::token::SpannedToken;
 use crate::parser::error::ParserError;
 use crate::{lexer::token::Token, parser::ast::Expr};
 
@@ -33,22 +34,42 @@ impl Precedence {
 }
 
 pub struct Parser {
-    tokens: Vec<Token>,
+    tokens: Vec<SpannedToken>,
     pos: usize,
+    errors: Vec<ParserError>,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+    pub fn new(tokens: Vec<SpannedToken>) -> Self {
+        log::debug!("Initializing parser...");
+        Parser {
+            tokens,
+            pos: 0,
+            errors: Vec::new(),
+        }
+    }
+
+    fn position(&self) -> (usize, usize, usize) {
+        if let Some(spanned) = self.tokens.get(self.pos) {
+            (spanned.span.line, spanned.span.col, spanned.span.pos)
+        } else if let Some(last) = self.tokens.last() {
+            (last.span.line, last.span.col, last.span.pos)
+        } else {
+            (1, 1, 0)
+        }
+    }
+
+    fn error(&mut self, error: ParserError) {
+        self.errors.push(error);
     }
 
     fn previous(&self) -> Option<&Token> {
         let mut i = self.pos;
         while i > 0 {
             i -= 1;
-            if let Some(token) = self.tokens.get(i) {
-                if !matches!(token, Token::Whitespace) {
-                    return Some(token);
+            if let Some(spanned) = self.tokens.get(i) {
+                if !matches!(spanned.value, Token::Whitespace) {
+                    return Some(&spanned.value);
                 }
             }
         }
@@ -56,45 +77,87 @@ impl Parser {
     }
 
     fn current(&self) -> Option<&Token> {
-        self.tokens.get(self.pos)
+        self.tokens.get(self.pos).map(|spanned| &spanned.value)
     }
 
     fn advance(&mut self) {
         self.pos += 1;
     }
 
-    fn skip_whitespace(&mut self) {
-        while let Some(Token::Whitespace) = self.current() {
-            self.advance();
+    fn synchronize(&mut self) {
+        while let Some(token) = self.current() {
+            match token {
+                Token::Semicolon | Token::Newline | Token::Eof => {
+                    self.advance();
+                    return;
+                }
+                _ => self.advance(),
+            }
         }
     }
 
     fn has_whitespace_before(&self) -> bool {
         if self.pos > 0 {
-            matches!(self.tokens.get(self.pos - 1), Some(Token::Whitespace))
+            matches!(
+                self.tokens.get(self.pos - 1).map(|s| &s.value),
+                Some(Token::Whitespace)
+            )
         } else {
             false
         }
     }
 
     fn expect(&mut self, expected: &Token) -> Result<(), ParserError> {
-        self.skip_whitespace();
-        if self.current() == Some(expected) {
+        log::debug!("expect({:?}) at pos {}", expected, self.pos);
+        self.whitespace();
+
+        let current = self.current().cloned().unwrap_or(Token::Eof);
+
+        if &current == expected {
             self.advance();
+            log::debug!("expect({:?}) succeeded", expected);
             Ok(())
         } else {
-            Err(ParserError::UnexpectedToken(
-                self.current().cloned().unwrap_or(Token::Eof),
-                self.pos,
-            ))
+            log::warn!("expect({:?}) failed, found {:?}", expected, current);
+
+            let (line, col, pos) = self.position();
+
+            if current == Token::Eof {
+                Err(ParserError::UnexpectedEof {
+                    expected: expected.clone().description(),
+                    line,
+                    col,
+                    pos,
+                })
+            } else {
+                Err(ParserError::ExpectedToken {
+                    expected: expected.clone(),
+                    found: current,
+                    line,
+                    col,
+                    pos,
+                })
+            }
         }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Expr>, ParserError> {
-        self.program()
+    fn whitespace(&mut self) {
+        while let Some(Token::Whitespace) = self.current() {
+            self.advance();
+        }
     }
 
-    fn program(&mut self) -> Result<Vec<Expr>, ParserError> {
+    pub fn parse(&mut self) -> Result<Vec<Expr>, Vec<ParserError>> {
+        let exprs = self.program();
+
+        if self.errors.is_empty() {
+            Ok(exprs)
+        } else {
+            Err(self.errors.clone())
+        }
+    }
+
+    fn program(&mut self) -> Vec<Expr> {
         let mut nodes = Vec::new();
 
         while let Some(tok) = self.current().cloned() {
@@ -103,30 +166,43 @@ impl Parser {
                 Token::Newline | Token::Semicolon | Token::Whitespace => {
                     self.advance();
                 }
-                _ => {
-                    let expr = self.expression(Precedence::Lowest)?;
-                    nodes.push(expr);
-                }
+                _ => match self.expression(Precedence::Lowest) {
+                    Ok(expr) => nodes.push(expr),
+                    Err(err) => {
+                        self.error(err);
+                        self.synchronize();
+                    }
+                },
             }
         }
 
-        Ok(nodes)
+        nodes
     }
 
     fn expression(&mut self, precedence: Precedence) -> Result<Expr, ParserError> {
         let mut left = self.prefix()?;
 
+        log::debug!(
+            "expression() at pos {}, precedence {:?}",
+            self.pos,
+            precedence
+        );
+
         loop {
-            self.skip_whitespace();
+            self.whitespace();
 
             let Some(token) = self.current().cloned() else {
                 break;
             };
 
             match token {
-                Token::Eof | Token::Newline | Token::Semicolon => break,
+                Token::Eof | Token::Newline | Token::Semicolon => {
+                    log::debug!("expression() reached end of expression at pos {}", self.pos);
+                    break;
+                }
 
                 Token::Equal => {
+                    log::debug!("expression() found assignment operator at pos {}", self.pos);
                     let token_prec = Precedence::Assignment;
                     if token_prec <= precedence {
                         break;
@@ -134,16 +210,30 @@ impl Parser {
 
                     match left {
                         Expr::Call { function, args } => {
+                            log::debug!("expression() found function call at pos {}", self.pos);
                             if let Expr::Identifier(name) = *function {
+                                log::debug!(
+                                    "expression() parsing function definition for '{}' at pos {}",
+                                    name,
+                                    self.pos
+                                );
                                 let mut params = Vec::new();
 
                                 for arg in args {
                                     if let Expr::Identifier(param_name) = arg {
                                         params.push(param_name);
                                     } else {
-                                        return Err(ParserError::InvalidFunctionParameter(
-                                            self.pos, arg,
-                                        ));
+                                        log::warn!(
+                                            "expression() invalid function parameter at pos {}",
+                                            self.pos
+                                        );
+                                        let (line, col, pos) = self.position();
+                                        return Err(ParserError::InvalidFunctionParameter {
+                                            param: arg,
+                                            line,
+                                            col,
+                                            pos,
+                                        });
                                     }
                                 }
 
@@ -155,12 +245,24 @@ impl Parser {
                                     body: Box::new(body),
                                 };
                             } else {
-                                return Err(ParserError::InvalidFunctionDefinition(
-                                    self.pos, token,
-                                ));
+                                log::warn!(
+                                    "expression() invalid function definition target at pos {}",
+                                    self.pos
+                                );
+                                let (line, col, pos) = self.position();
+                                return Err(ParserError::InvalidFunctionDefinition {
+                                    line,
+                                    col,
+                                    pos,
+                                });
                             }
                         }
                         Expr::Identifier(name) => {
+                            log::debug!(
+                                "expression() parsing assignment to '{}' at pos {}",
+                                name,
+                                self.pos
+                            );
                             self.advance();
                             let value = self.expression(Precedence::Assignment)?;
                             left = Expr::Assignment {
@@ -169,16 +271,29 @@ impl Parser {
                             };
                         }
                         _ => {
-                            return Err(ParserError::InvalidAssignment(self.pos, left, token));
+                            log::warn!(
+                                "expression() invalid assignment target at pos {}",
+                                self.pos
+                            );
+                            let (line, col, pos) = self.position();
+
+                            return Err(ParserError::InvalidAssignment {
+                                target: left,
+                                line,
+                                col,
+                                pos,
+                            });
                         }
                     }
                 }
 
                 Token::LParen => {
-                    if matches!(left, Expr::Identifier(_)) 
+                    log::debug!("expression() found '(' at pos {}", self.pos);
+                    if matches!(left, Expr::Identifier(_))
                         && !self.has_whitespace_before()
                         && precedence < Precedence::Product
                     {
+                        log::debug!("expression() found function call at pos {}", self.pos);
                         left = self.call(left)?;
                     } else if !self.has_whitespace_before() {
                         let token_prec = Precedence::Product;
@@ -198,6 +313,10 @@ impl Parser {
                 }
 
                 t if self.is_implicit_multiplication(&t) => {
+                    log::debug!(
+                        "expression() found implicit multiplication at pos {}",
+                        self.pos
+                    );
                     let token_prec = Precedence::Product;
                     if token_prec < precedence {
                         break;
@@ -212,6 +331,11 @@ impl Parser {
                 }
 
                 _ => {
+                    log::debug!(
+                        "expression() found infix operator {:?} at pos {}",
+                        token,
+                        self.pos
+                    );
                     let token_prec = Precedence::from_token(&token);
 
                     let should_break = match token {
@@ -235,24 +359,29 @@ impl Parser {
             }
         }
 
+        log::debug!("expression() returning {:?}", left);
         Ok(left)
     }
 
     fn prefix(&mut self) -> Result<Expr, ParserError> {
-        self.skip_whitespace();
+        log::debug!("prefix() at pos {}", self.pos);
+        self.whitespace();
 
         match self.current().cloned() {
             Some(Token::Number(n)) => {
+                log::debug!("prefix() found number {:?}", n);
                 self.advance();
                 Ok(Expr::Number(n))
             }
 
             Some(Token::Identifier(name)) => {
+                log::debug!("prefix() found identifier {:?}", name);
                 self.advance();
                 Ok(Expr::Identifier(name))
             }
 
             Some(Token::Minus) | Some(Token::Plus) => {
+                log::debug!("prefix() found unary operator {:?}", self.current());
                 let op = self.current().cloned().unwrap();
                 self.advance();
                 let expr = self.expression(Precedence::Prefix)?;
@@ -263,20 +392,40 @@ impl Parser {
             }
 
             Some(Token::LParen) => {
+                log::debug!("prefix() found grouped expression");
                 self.advance();
                 let expr = self.expression(Precedence::Lowest)?;
                 self.expect(&Token::RParen)?;
+                log::debug!("prefix() done grouping expression: {:?}", expr);
                 Ok(expr)
             }
 
-            _ => Err(ParserError::UnexpectedToken(
-                self.current().cloned().unwrap_or(Token::Eof),
-                self.pos,
-            )),
+            Some(token) => {
+                log::warn!("prefix() found unexpected token {:?}", token);
+                let (line, col, pos) = self.position();
+                Err(ParserError::UnexpectedToken {
+                    found: token,
+                    line,
+                    col,
+                    pos,
+                })
+            }
+
+            None => {
+                log::warn!("prefix() found unexpected end of input");
+                let (line, col, pos) = self.position();
+                Err(ParserError::UnexpectedEof {
+                    expected: "expression".into(),
+                    line,
+                    col,
+                    pos,
+                })
+            }
         }
     }
 
     fn call(&mut self, function: Expr) -> Result<Expr, ParserError> {
+        log::debug!("call() at pos {}", self.pos);
         let args = self.arguments()?;
         Ok(Expr::Call {
             function: Box::new(function),
@@ -285,15 +434,16 @@ impl Parser {
     }
 
     fn arguments(&mut self) -> Result<Vec<Expr>, ParserError> {
+        log::debug!("arguments() at pos {}", self.pos);
         self.expect(&Token::LParen)?;
         let mut args = Vec::new();
 
-        self.skip_whitespace();
+        self.whitespace();
         if self.current() != Some(&Token::RParen) {
             loop {
                 args.push(self.expression(Precedence::Lowest)?);
 
-                self.skip_whitespace();
+                self.whitespace();
                 if self.current() == Some(&Token::Comma) {
                     self.advance();
                 } else {
@@ -307,25 +457,26 @@ impl Parser {
     }
 
     fn is_implicit_multiplication(&self, token: &Token) -> bool {
-        use Token::*;
-
+        log::debug!("is_implicit_multiplication() at pos {}", self.pos);
         if self.has_whitespace_before() {
             return false;
         }
 
         match token {
-            LParen => {
+            Token::Identifier(_) => {
                 matches!(
                     self.previous(),
-                    Some(Number(_)) | Some(Identifier(_)) | Some(RParen)
+                    Some(Token::Number(_)) | Some(Token::RParen)
                 )
             }
 
-            Identifier(_) => {
-                matches!(self.previous(), Some(Number(_)) | Some(RParen))
+            Token::Number(_) => {
+                matches!(
+                    self.previous(),
+                    Some(Token::RParen) | Some(Token::Identifier(_))
+                )
             }
 
-            Number(_) => matches!(self.previous(), Some(RParen) | Some(Identifier(_))),
             _ => false,
         }
     }

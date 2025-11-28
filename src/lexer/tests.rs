@@ -1,13 +1,15 @@
 #[cfg(test)]
 mod lexer_tests {
-    use crate::lexer::{error::LexerError, token::Token, tokenizer::Lexer};
+    use crate::lexer::{error::LexerError, token::{SpannedToken, Token}, tokenizer::Lexer};
 
-    fn filter_tokens(tokens: Vec<Token>) -> Vec<Token> {
+    fn filter_tokens(tokens: Vec<SpannedToken>) -> Vec<Token> {
         tokens
             .into_iter()
+            .map(|spanned| spanned.value)
             .filter(|t| *t != Token::Whitespace)
             .collect()
     }
+
     #[test]
     fn test_numbers() {
         let mut lexer = Lexer::new("12 3.45 6.7 .89 1.23e4 5.6E-2");
@@ -110,7 +112,10 @@ mod lexer_tests {
         let err = lexer.tokenize().unwrap_err();
         assert_eq!(err.len(), 1);
         match &err[0] {
-            LexerError::InvalidNumberFormat(s, _, _) => assert_eq!(s, "12.3.4"),
+            LexerError::InvalidNumberFormat(s, _, _) => {
+                println!("Invalid number format: {}", s);
+                assert_eq!(s, "12.3.4");
+            }
             _ => panic!("Expected InvalidNumberFormat"),
         }
     }
