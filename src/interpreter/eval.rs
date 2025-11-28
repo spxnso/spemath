@@ -103,3 +103,9 @@ impl Evaluator {
         }
     }
 }
+
+impl Default for Evaluator {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -1,0 +1,97 @@
+:root{
+    --bg:#0f0f0f;
+    --panel:#111;
+    --muted:#1b1b1b;
+    --accent:#7c3aed;
+    --accent-hover :#9d4edd;
+    --text:#ffffff;
+    --highlight:#40c057;
+    --max-width:900px;
+    --gutter:20px;
+    --radius:4px;
+    --input-height:150px;
+    --font-sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    padding: 0;
+}
+
+body {
+    padding: var(--gutter);
+}
+
+.container {
+    max-width: var(--max-width);
+    margin: 48px auto;
+    padding: var(--gutter);
+}
+
+h1 {
+    margin: 0 0 18px 0;
+    font-size: 1.6rem;
+    line-height: 1.2;
+}
+
+textarea,
+button,
+pre {
+    display: block;
+    width: 100%;
+    border-radius: var(--radius);
+    font-size: 16px;
+}
+
+textarea {
+    height: var(--input-height);
+    background: var(--muted);
+    color: var(--text);
+    border: 1px solid #333;
+    padding: 12px;
+    font-family: var(--font-mono);
+    resize: vertical;
+}
+
+button {
+    margin-top: 15px;
+    padding: 12px;
+    background: var(--accent);
+    border: none;
+    color: var(--text);
+    font-size: 18px;
+    cursor: pointer;
+    transition: background 160ms ease;
+    border-radius: calc(var(--radius) + 2px);
+}
+
+button:hover {
+    background: var(--accent-hover);
+}
+
+pre {
+    background: var(--panel);
+    color: var(--highlight);
+    padding: 15px;
+    margin-top: 20px;
+    min-height: var(--input-height);
+    border-radius: var(--radius);
+    white-space: pre-wrap;
+    border: 1px solid #222;
+    overflow: auto;
+}
+
+@media (max-width: 520px) {
+    .container { margin: 24px auto; padding: 14px; }
+    h1 { font-size: 1.25rem; }
+    button { font-size: 16px; padding: 10px; }
+}

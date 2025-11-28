@@ -22,3 +22,9 @@ impl Env {
         self.variables.insert(name, value);
     }
 }
+
+impl Default for Env {
+    fn default() -> Self {
+        Self::new()
+    }
+}
